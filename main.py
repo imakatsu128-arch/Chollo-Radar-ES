@@ -1,5 +1,5 @@
-"""Chollo-Radar-ES - 西班牙深度折扣监控引擎 | 反检测 + Telegram + GitHub Issue"""
-import os, random, time, logging, requests
+"""Chollo-Radar-ES - 双数据源折扣监控 | 爬虫 + 卖家提交"""
+import os, random, time, logging, requests, json
 from bs4 import BeautifulSoup
 
 # ==================== 配置 ====================
@@ -29,66 +29,116 @@ def random_delay(min_s=2, max_s=5):
     """随机延迟，模拟人类行为"""
     time.sleep(random.uniform(min_s, max_s))
 
-def safe_get_text(el, default=""):
-    """安全获取元素文本"""
-    return el.get_text(strip=True) if el else default
-
-def safe_get_attr(el, attr, default=""):
-    """安全获取元素属性"""
-    return el.get(attr, default) if el else default
-
-# ==================== 核心爬虫 ====================
-def get_chollos():
-    """抓取 Amazon ES 折扣，过滤 >=50% 或价格错误"""
+# ==================== 数据源 A：自动爬取 ====================
+def scrape_amazon():
+    """爬取 Amazon ES 折扣"""
     url, session = "https://www.amazon.es/gp/goldbox", requests.Session()
     try:
         random_delay()
-        log.info(f"🌐 抓取: {url}")
+        log.info(f"🌐 爬取 Amazon: {url}")
         res = session.get(url, headers=get_random_headers(), timeout=15)
-        if res.status_code in [403, 429]:
-            log.error(f"❌ {res.status_code} - 反爬触发，停止执行"); return []
-        if res.status_code != 200:
-            log.warning(f"⚠️ HTTP {res.status_code}"); return []
+        if res.status_code != 200: return []
         soup = BeautifulSoup(res.text, 'html.parser')
-        if not soup.body: log.error("❌ 页面解析失败"); return []
-        
-        selectors = ['.deal-container', '[data-component-type="s-search-result"]', '.octopus-dlp-asin-section']
-        items = next((soup.select(s) for s in selectors if soup.select(s)), [])
+        items = soup.select('.deal-container, [data-component-type="s-search-result"]')[:5]
         results = []
-        for item in items[:10]:
-            title = safe_get_text(item.select_one('.deal-title, .a-text-normal'), "未知")
-            discount = safe_get_text(item.select_one('.discount-label, .savingsPercentage'), "0%")
-            href = safe_get_attr(item.select_one('a[href*="/dp/"]'), 'href')
-            if not href: continue
-            link = f"https://www.amazon.es{href}" if href.startswith('/') else href
-            discount_num = int(''.join(filter(str.isdigit, discount)) or '0')
-            is_price_error = 'error' in title.lower() or 'error' in discount.lower()
-            if discount_num >= 50 or is_price_error:
-                tag = "💥 价格错误!" if is_price_error else f"💥 -{discount_num}%"
-                results.append(f"🛒 **{title[:45]}**\n{tag}\n🔗 [捡漏链接]({link})")
-                log.info(f"✨ 发现: {title[:25]}... | {tag}")
-        log.info(f"🎯 共 {len(results)} 个高价值折扣"); return results[:5]
-    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-        log.error(f"❌ 网络错误: {type(e).__name__}"); return []
+        for item in items:
+            title = item.select_one('.deal-title, .a-text-normal')
+            discount = item.select_one('.discount-label, .savingsPercentage')
+            link = item.select_one('a[href*="/dp/"]')
+            if title and discount and link:
+                title_text = title.get_text(strip=True)[:45]
+                discount_text = discount.get_text(strip=True)
+                link_href = link['href']
+                if link_href.startswith('/'): link_href = f"https://www.amazon.es{link_href}"
+                discount_num = int(''.join(filter(str.isdigit, discount_text)) or '0')
+                if discount_num >= 50:
+                    results.append(f"🛒 **{title_text}**\n💥 -{discount_num}%\n🔗 [Amazon链接]({link_href})")
+        log.info(f"✅ Amazon 发现 {len(results)} 个折扣")
+        return results
     except Exception as e:
-        log.error(f"❌ 异常: {e}"); return []
-    finally: session.close()
+        log.error(f"❌ Amazon 爬取失败: {e}")
+        return []
 
-# ==================== Telegram 推送 ====================
-def push_alert(msg):
-    """发送 Telegram 消息"""
-    if not (TG_TOKEN and TG_CHAT_ID and msg): return False
+# ==================== 数据源 B：卖家提交 ====================
+def fetch_seller_submissions():
+    """获取 GitHub Issues 中的卖家提交"""
+    if not (GH_TOKEN and GH_REPO): return []
     try:
-        random_delay(1, 2)
-        res = requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                            data={"chat_id": TG_CHAT_ID, "text": msg, "parse_mode": "Markdown"}, timeout=10)
-        log.info("✅ 推送成功" if res.ok else f"❌ 推送失败: {res.status_code}"); return res.ok
-    except Exception as e: log.error(f"❌ 推送异常: {e}"); return False
+        url = f"https://api.github.com/repos/{GH_REPO}/issues?state=open&labels=折扣提交"
+        headers = {"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code != 200: return []
+        issues = res.json()
+        results, issue_ids = [], []
+        for issue in issues:
+            body = issue.get('body', '')
+            lines = [l.strip() for l in body.split('\n') if ':' in l]
+            data = {l.split(':', 1)[0].strip(): l.split(':', 1)[1].strip() for l in lines if len(l.split(':', 1)) == 2}
+            product = data.get('product_name', '未知商品')
+            discount = data.get('discount_percent', '0')
+            link = data.get('product_link', '')
+            store = data.get('store', '未知店铺')
+            if product and link:
+                results.append(f"📦 **{product[:45]}**\n🏪 {store} | 💰 -{discount}%\n🔗 [卖家链接]({link})")
+                issue_ids.append(issue['number'])
+        log.info(f"✅ 卖家提交 {len(results)} 个折扣")
+        return results, issue_ids
+    except Exception as e:
+        log.error(f"❌ 获取卖家提交失败: {e}")
+        return [], []
+
+def close_issues(issue_ids):
+    """关闭已处理的 Issues"""
+    if not (GH_TOKEN and GH_REPO and issue_ids): return
+    for issue_id in issue_ids:
+        try:
+            url = f"https://api.github.com/repos/{GH_REPO}/issues/{issue_id}"
+            headers = {"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+            requests.patch(url, json={"state": "closed"}, headers=headers, timeout=5)
+            log.info(f"✅ 关闭 Issue #{issue_id}")
+        except Exception as e:
+            log.error(f"❌ 关闭 Issue #{issue_id} 失败: {e}")
+
+# ==================== 报告生成 ====================
+def create_daily_report(amazon_deals, seller_deals):
+    """创建每日折扣报告"""
+    if not (amazon_deals or seller_deals): return None
+    date = time.strftime('%Y-%m-%d')
+    report = f"# 📊 Chollo 日报 {date}\n\n"
+    if amazon_deals:
+        report += f"## 🤖 自动监控 ({len(amazon_deals)})\n" + "\n\n".join(amazon_deals) + "\n\n"
+    if seller_deals:
+        report += f"## 👥 卖家提交 ({len(seller_deals)})\n" + "\n\n".join(seller_deals) + "\n\n"
+    report += f"---\n📅 报告生成时间: {time.strftime('%H:%M:%S')}"
+    return report
+
+def publish_report(report):
+    """发布报告到 GitHub Issue"""
+    if not (GH_TOKEN and GH_REPO and report): return False
+    try:
+        url = f"https://api.github.com/repos/{GH_REPO}/issues"
+        headers = {"Authorization": f"token {GH_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+        title = f"📊 Chollo 日报 {time.strftime('%Y-%m-%d')}"
+        res = requests.post(url, json={"title": title, "body": report, "labels": ["chollo", "日报"]}, headers=headers, timeout=10)
+        log.info("✅ 日报发布成功" if res.ok else f"❌ 日报发布失败: {res.status_code}")
+        return res.ok
+    except Exception as e:
+        log.error(f"❌ 日报发布异常: {e}")
+        return False
 
 # ==================== 主入口 ====================
 if __name__ == "__main__":
-    log.info("🚀 Chollo-Radar-ES 启动")
-    chollos = get_chollos()
-    if chollos: push_alert("🚀 **Chollo-Radar-ES 捡漏预警**\n\n" + "\n\n".join(chollos))
-    else: log.info("📭 暂无高价值折扣")
+    log.info("🚀 Chollo-Radar-ES 双数据源启动")
+    amazon_deals = scrape_amazon()
+    seller_deals, issue_ids = fetch_seller_submissions()
+    report = create_daily_report(amazon_deals, seller_deals)
+    if report:
+        publish_report(report)
+        close_issues(issue_ids)
+        if TG_TOKEN and TG_CHAT_ID:
+            summary = f"🚀 **Chollo 日报已生成**\n🤖 自动监控: {len(amazon_deals)} 个\n👥 卖家提交: {len(seller_deals)} 个\n📝 查看完整报告: https://github.com/{GH_REPO}/issues"
+            requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+                          data={"chat_id": TG_CHAT_ID, "text": summary, "parse_mode": "Markdown"}, timeout=10)
+    else:
+        log.info("📭 今日无折扣信息")
     log.info("🏁 运行结束")

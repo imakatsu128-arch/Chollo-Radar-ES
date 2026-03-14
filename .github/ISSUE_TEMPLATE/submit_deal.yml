@@ -1,0 +1,80 @@
+name: "📦 提交折扣信息"
+description: "卖家/用户提交西班牙市场折扣信息"
+title: "[折扣提交] "
+labels: ["折扣提交"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 🛒 折扣信息提交表单
+        请填写以下信息，审核通过后将自动加入每日折扣报告。
+        
+        ---
+  - type: input
+    id: product_name
+    attributes:
+      label: "商品名称"
+      description: "完整的商品名称"
+      placeholder: "例如：Samsung Galaxy S24 Ultra 512GB"
+    validations:
+      required: true
+  - type: input
+    id: discount_percent
+    attributes:
+      label: "折扣百分比"
+      description: "折扣百分比（如 50% 填写 50）"
+      placeholder: "50"
+    validations:
+      required: true
+  - type: input
+    id: original_price
+    attributes:
+      label: "原价"
+      description: "原价（欧元）"
+      placeholder: "1299.99"
+    validations:
+      required: true
+  - type: input
+    id: current_price
+    attributes:
+      label: "现价"
+      description: "折扣后价格（欧元）"
+      placeholder: "649.99"
+    validations:
+      required: true
+  - type: input
+    id: product_link
+    attributes:
+      label: "商品链接"
+      description: "完整的商品购买链接"
+      placeholder: "https://www.amazon.es/dp/..."
+    validations:
+      required: true
+  - type: dropdown
+    id: store
+    attributes:
+      label: "店铺平台"
+      description: "选择商品所在的平台"
+      options:
+        - Amazon.es
+        - MediaMarkt
+        - PcComponentes
+        - El Corte Inglés
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: "备注信息"
+      description: "其他需要说明的信息"
+      placeholder: "例如：限时优惠、库存紧张、额外赠品等"
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        ### 📋 提交说明
+        1. 提交后系统会自动添加 "折扣提交" 标签
+        2. 每日报告生成时会自动处理所有待处理提交
+        3. 处理完成后 Issue 会自动关闭
+        4. 折扣信息会出现在当日的 Chollo 报告中
