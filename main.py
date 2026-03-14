@@ -1,9 +1,10 @@
-"""Chollo-Radar-ES - 西班牙深度折扣监控引擎 | 反检测 + Telegram 推送"""
+"""Chollo-Radar-ES - 西班牙深度折扣监控引擎 | 反检测 + Telegram + GitHub Issue"""
 import os, random, time, logging, requests
 from bs4 import BeautifulSoup
 
 # ==================== 配置 ====================
 TG_TOKEN, TG_CHAT_ID = os.getenv("TG_TOKEN"), os.getenv("TG_CHAT_ID")
+GH_TOKEN, GH_REPO = os.getenv("GH_TOKEN"), os.getenv("GITHUB_REPOSITORY")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger(__name__)
 
